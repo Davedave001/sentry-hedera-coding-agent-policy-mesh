@@ -13,6 +13,6 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["server"],
+  "include": ["server", "mcp-server"],
   "exclude": ["node_modules", "dist"]
 }
