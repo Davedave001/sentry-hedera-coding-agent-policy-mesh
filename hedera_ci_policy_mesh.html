@@ -533,10 +533,8 @@ const state = {
 };
 
 // ── Helpers ──
-const sleep = ms => new Promise(r=>setTimeout(r,ms));
 function fmt(n,d=2){return Number(n).toFixed(d)}
 function ts(){const n=new Date();return `${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')}`}
-function hbar(agent){const a=AGENTS[agent];return (a.inputK/1000*a.inputUSD + a.outputK/1000*a.outputUSD)/HBAR_USD}
 function totalSpent(){return Object.values(state.spent).reduce((a,b)=>a+b,0)}
 
 // ── Log ──
@@ -636,213 +634,106 @@ function selectStage(i){
   });
 }
 
+// ── Live backend connection ──
+// Replaces the former Math.random() simulation: the server (server/pipeline.ts)
+// runs the real agent calls + policy hooks + Hedera payments and streams every
+// decision back over this socket using the event vocabulary below. Every DOM
+// helper above (log, setNode, setConn, setNodeCost, firePacket, showApproval) is
+// unchanged — only the source of truth moved from a local sleep()-paced script to
+// the live backend.
+const NODE_AGENT = ['orch','qa','opt','ctx','sec','dep'];
+let currentApprovalRunId = null;
+let ws = null;
+
+function connectWs(){
+  ws = new WebSocket(`ws://${location.host}`);
+  ws.onmessage = (ev) => handleServerEvent(JSON.parse(ev.data));
+  ws.onclose = () => setTimeout(connectWs, 1000);
+}
+
+function handleServerEvent(event){
+  switch(event.type){
+    case 'log':
+      log(event.agentKey, event.tagClass, event.tagText, event.msg);
+      break;
+    case 'node':
+      setNode(event.i, event.state);
+      setDot(NODE_AGENT[event.i], event.state === 'run');
+      break;
+    case 'conn':
+      setConn(event.i, event.state);
+      break;
+    case 'cost':
+      setNodeCost(event.i, event.text);
+      break;
+    case 'packet':
+      firePacket(event.i);
+      break;
+    case 'metrics':
+      state.spent = event.spent;
+      state.calls = event.calls;
+      state.blocked = event.blocked;
+      state.tokensSaved = event.tokensSaved;
+      state.runs = event.runs;
+      updateMetrics();
+      break;
+    case 'approval': {
+      currentApprovalRunId = event.runId;
+      const s = event.summary;
+      const bodyHTML = `
+        <span>Agent</span>     <strong>${s.agent}</strong><br>
+        <span>Recipient</span> <strong class="v">${s.recipientAccount}</strong><br>
+        <span>PR</span>        <strong>${s.prTitle.substring(0,44)}${s.prTitle.length>44?'…':''}</strong><br>
+        <span>QA cover</span>  <strong>${s.coverage}%</strong><br>
+        <span>Complexity</span><strong>−${s.complexityReduction}%</strong><br>
+        <span>Tokens saved</span><strong>${s.tokensSavedPct}%</strong><br>
+        <span>Cost</span>      <strong class="v">${fmt(s.costHbar,2)} ℏ ≈ $${fmt(s.costUsd,4)}</strong>
+      `;
+      showApproval(event.title, event.p, bodyHTML).then(approved => {
+        fetch('/approve', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({runId: currentApprovalRunId, approved}),
+        });
+      });
+      break;
+    }
+    case 'status':
+      if(event.status !== 'running') done(event.status === 'passed');
+      break;
+  }
+}
+
 // ── Pipeline runner ──
 async function runPipeline(){
   if(state.running)return;
   const pr=document.getElementById('pr-input').value.trim();
   if(!pr)return;
   state.running=true;
-  state.runs++;
   document.getElementById('run-btn').disabled=true;
   document.getElementById('pipeline-status').textContent='● RUNNING';
   document.getElementById('pipeline-status').style.color='var(--warn)';
   document.getElementById('pr-input').value='';
 
-  // reset nodes
   for(let i=0;i<6;i++){setNode(i,'');setNodeCost(i,'—');}
   for(let i=0;i<5;i++)setConn(i,'');
 
-  // randomise scenario params
-  const coverage  = 60+Math.floor(Math.random()*38);    // 60–97%
-  const complexity= 10+Math.floor(Math.random()*30);    // 10–39% improvement
-  const ctxSave   = 15+Math.floor(Math.random()*35);    // 15–49% token savings
-  const hasVuln   = Math.random()<0.25;                  // 25% chance critical vuln
-
-  // ─────────────────────────────────────────────
-  // STAGE 0: ORCHESTRATOR
-  // ─────────────────────────────────────────────
-  setNode(0,'run'); setDot('orch',true);
-  log('orch','t-hook','S1·SPEND',`SpendCap check — call cost: <span class="hl-a">${fmt(hbar('orch'),2)} ℏ</span> · cap: <span class="hl">8 ℏ</span>`);
-  await sleep(400);
-
-  if(hbar('orch')>AGENTS.orch.cap){
-    log('orch','t-block','BLOCKED','SpendCap — Orchestrator call exceeds cap. Pipeline aborted.');
-    state.blocked++;setNode(0,'fail');setDot('orch',false);done(false);return;
+  try {
+    const res = await fetch('/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({prTitle: pr}),
+    });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      log('orch','t-block','ERROR', err.error || 'Failed to start pipeline run');
+      done(false);
+    }
+  } catch(e) {
+    log('orch','t-block','ERROR','Could not reach policy mesh server: '+e.message);
+    done(false);
   }
-  log('orch','t-pass','PASSED',`SpendCap ✓ — submitting <span class="hl-a">${fmt(hbar('orch'),2)} ℏ</span> → <span class="hl">0.0.4567890 (Claude)</span>`);
-  await sleep(350);
-  firePacket(0);
-  log('orch','t-hook','S4·HCS',`Audit written to HCS <span class="hl">0.0.9871234</span> — orchestrator invocation logged`);
-  state.spent.orch+=hbar('orch'); state.calls++;
-  setNodeCost(0,fmt(hbar('orch'),2)+' ℏ');
-  await sleep(500);
-  log('orch','t-hook','PLAN',`Orchestrator analysed PR "<span class="hl">${pr}</span>". Dispatching to QA → Optimizer → CtxReducer → Security → Deploy`);
-  setNode(0,'done'); setDot('orch',false); setConn(0,'live');
-  updateMetrics(); await sleep(400);
-
-  // ─────────────────────────────────────────────
-  // STAGE 1: QA EVALUATOR
-  // ─────────────────────────────────────────────
-  setConn(0,'done'); setNode(1,'run'); setDot('qa',true);
-  log('qa','t-hook','S1·SPEND',`SpendCap check — call cost: <span class="hl-a">${fmt(hbar('qa'),2)} ℏ</span> · cap: <span class="hl-q">3 ℏ</span>`);
-  await sleep(350);
-
-  if(hbar('qa')>AGENTS.qa.cap){
-    log('qa','t-block','BLOCKED','QA call exceeds per-agent cap. Aborting.');
-    state.blocked++;setNode(1,'fail');setDot('qa',false);done(false);return;
-  }
-  log('qa','t-pass','PASSED',`SpendCap ✓ → paying <span class="hl-q">${fmt(hbar('qa'),2)} ℏ</span>`);
-  firePacket(1);
-  state.spent.qa+=hbar('qa'); state.calls++;
-  setNodeCost(1,fmt(hbar('qa'),2)+' ℏ');
-  await sleep(600);
-
-  log('qa','t-eval','EVAL',`Running test suite… coverage result: <span class="${coverage>=80?'hl-g':'hl-r'}">${coverage}%</span>`);
-  await sleep(400);
-
-  // QA Coverage Policy (S2 — post-param normalization)
-  log('qa','t-policy','S2·QA',`QACoverageGate — threshold: 80% · actual: <span class="${coverage>=80?'hl-g':'hl-r'}">${coverage}%</span>`);
-  await sleep(300);
-
-  if(coverage<80){
-    log('qa','t-block','BLOCKED',`QACoverageGate: coverage ${coverage}% < 80%. Optimizer + CtxReducer spend BLOCKED. Pipeline must fix tests before advancing.`);
-    state.blocked++;setNode(1,'fail');setDot('qa',false);
-    log('qa','t-hook','S4·HCS',`HCS audit: QA FAIL · coverage=${coverage}% · pipeline halted`);
-    done(false,'qa');return;
-  }
-  log('qa','t-pass','GATE✓',`QACoverageGate passed — ${coverage}% ≥ 80%. Authorising Optimizer spend.`);
-  log('qa','t-hook','S4·HCS',`HCS: QA PASS · coverage=${coverage}% · txID=0.0.QA@${Date.now()}`);
-  setNode(1,'done'); setDot('qa',false); setConn(1,'live');
-  updateMetrics(); await sleep(350);
-
-  // ─────────────────────────────────────────────
-  // STAGE 2: CODE OPTIMIZER
-  // ─────────────────────────────────────────────
-  setConn(1,'done'); setNode(2,'run'); setDot('opt',true);
-  log('opt','t-hook','S1·SPEND',`SpendCap check — call cost: <span class="hl-a">${fmt(hbar('opt'),2)} ℏ</span> · cap: <span class="hl-o">2 ℏ</span>`);
-  await sleep(300);
-
-  if(hbar('opt')>AGENTS.opt.cap){
-    log('opt','t-block','BLOCKED','Optimizer call exceeds cap.');
-    state.blocked++;setNode(2,'fail');setDot('opt',false);done(false);return;
-  }
-
-  // OptROI Policy (S2)
-  log('opt','t-policy','S2·ROI',`OptROIPolicy — projected complexity reduction: <span class="${complexity>=15?'hl-g':'hl-r'}">${complexity}%</span> · threshold: 15%`);
-  await sleep(350);
-  if(complexity<15){
-    log('opt','t-block','BLOCKED',`OptROIPolicy: ${complexity}% improvement below 15% threshold. Optimization spend not justified. Skipping.`);
-    state.blocked++;setNode(2,'fail');setDot('opt',false);setConn(2,'done');
-    updateMetrics();
-    // continue to ctx reducer still
-    await sleep(200);
-  } else {
-    log('opt','t-pass','GATE✓',`OptROIPolicy passed — ${complexity}% ≥ 15%. Proceeding.`);
-    log('opt','t-pass','PASSED',`Paying <span class="hl-o">${fmt(hbar('opt'),2)} ℏ</span> → DeepSeek V4 Pro <span class="hl">0.0.5012987</span>`);
-    firePacket(2);
-    state.spent.opt+=hbar('opt'); state.calls++;
-    setNodeCost(2,fmt(hbar('opt'),2)+' ℏ');
-    await sleep(700);
-    log('opt','t-opt','RESULT',`Optimizer reduced cyclomatic complexity by <span class="hl-g">${complexity}%</span>. Dead code removed. PRs generated.`);
-    log('opt','t-hook','S4·HCS',`HCS: OPT PASS · complexity_reduction=${complexity}% · cost=${fmt(hbar('opt'),2)}ℏ`);
-    setNode(2,'done'); setDot('opt',false); setConn(2,'done');
-    updateMetrics(); await sleep(300);
-  }
-
-  // ─────────────────────────────────────────────
-  // STAGE 3: CONTEXT REDUCER
-  // ─────────────────────────────────────────────
-  setNode(3,'run'); setDot('ctx',true);
-  log('ctx','t-hook','S1·SPEND',`SpendCap check — <span class="hl-a">${fmt(hbar('ctx'),2)} ℏ</span> · cap: <span class="hl-b">0.8 ℏ</span>`);
-  await sleep(300);
-
-  // CtxSavings Policy (S2)
-  const tokensSaved=Math.floor(ctxSave*0.8);
-  log('ctx','t-policy','S2·CTX',`CtxSavingsPolicy — projected token savings: <span class="${ctxSave>=20?'hl-g':'hl-r'}">${ctxSave}%</span> (${tokensSaved}K tokens) · threshold: 20%`);
-  await sleep(350);
-
-  if(ctxSave<20){
-    log('ctx','t-block','BLOCKED',`CtxSavingsPolicy: ${ctxSave}% savings below 20% threshold. Not cost-effective. Micropayment skipped.`);
-    state.blocked++;setNode(3,'fail');setDot('ctx',false);setConn(3,'done');
-    updateMetrics();await sleep(200);
-  } else {
-    log('ctx','t-pass','GATE✓',`CtxSavingsPolicy passed — ${ctxSave}% ≥ 20%. Paying context reduction fee.`);
-    log('ctx','t-pay','PAY',`Micropayment: <span class="hl-b">${fmt(hbar('ctx'),2)} ℏ</span> → DeepSeek V4 Flash <span class="hl">0.0.5012987</span>`);
-    firePacket(3);
-    state.spent.ctx+=hbar('ctx'); state.calls++; state.tokensSaved+=tokensSaved;
-    setNodeCost(3,fmt(hbar('ctx'),2)+' ℏ');
-    await sleep(600);
-    log('ctx','t-ctx','RESULT',`Context reduced by <span class="hl-g">${ctxSave}%</span> — <span class="hl-b">${tokensSaved}K tokens</span> saved across future agent calls. Downstream API costs cut.`);
-    log('ctx','t-hook','S4·HCS',`HCS: CTX PASS · tokens_saved=${tokensSaved}K · cost=${fmt(hbar('ctx'),2)}ℏ`);
-    setNode(3,'done'); setDot('ctx',false); setConn(3,'done');
-    updateMetrics(); await sleep(300);
-  }
-
-  // ─────────────────────────────────────────────
-  // STAGE 4: SECURITY SCANNER
-  // ─────────────────────────────────────────────
-  setConn(3,'live');await sleep(100);setConn(3,'done');
-  setNode(4,'run'); setDot('sec',true);
-  log('sec','t-hook','S1·SPEND',`SpendCap check — <span class="hl-a">${fmt(hbar('sec'),2)} ℏ</span> · cap: <span style="color:var(--security)">4 ℏ</span>`);
-  await sleep(350);
-  log('sec','t-pass','PASSED',`Paying <span style="color:var(--security)">${fmt(hbar('sec'),2)} ℏ</span> → Claude Sonnet 4.6 <span class="hl">0.0.4567890</span>`);
-  firePacket(4);
-  state.spent.sec+=hbar('sec'); state.calls++;
-  setNodeCost(4,fmt(hbar('sec'),2)+' ℏ');
-  await sleep(700);
-
-  if(hasVuln){
-    log('sec','t-block','CRITICAL',`⛔ CRITICAL vulnerability detected — SQL injection in auth handler. SecClearancePolicy BLOCKED deploy spend. Pipeline halted.`);
-    state.blocked++;
-    log('sec','t-policy','S3·SEC',`SecClearancePolicy — CRITICAL vuln present → Deployer HBAR payment blocked at Stage 3.`);
-    log('sec','t-hook','S4·HCS',`HCS: SEC FAIL · vuln=CRITICAL · deploy_blocked=true · cost=${fmt(hbar('sec'),2)}ℏ`);
-    setNode(4,'fail'); setDot('sec',false);
-    updateMetrics(); done(false,'sec'); return;
-  }
-
-  log('sec','t-pass','CLEAR',`No critical vulnerabilities detected. <span style="color:var(--security)">Security clearance issued.</span> Issuing deploy token to Deployer agent.`);
-  log('sec','t-hook','S4·HCS',`HCS: SEC PASS · clearance_token=0x${Math.random().toString(16).slice(2,10)} · cost=${fmt(hbar('sec'),2)}ℏ`);
-  setNode(4,'done'); setDot('sec',false); setConn(4,'live');
-  updateMetrics(); await sleep(350);
-
-  // ─────────────────────────────────────────────
-  // STAGE 5: DEPLOYER (always HITL)
-  // ─────────────────────────────────────────────
-  setConn(4,'done'); setNode(5,'run'); setDot('dep',true);
-  log('dep','t-policy','S3·HITL',`DeployHITL — always-on approval gate. Surfacing unsigned tx bytes for human review.`);
-  await sleep(400);
-
-  const depCost=hbar('dep');
-  const bodyHTML=`
-    <span>Agent</span>     <strong>Deployer (Claude Haiku 4.5)</strong><br>
-    <span>Recipient</span> <strong class="v">0.0.8891100 (deploy infra)</strong><br>
-    <span>PR</span>        <strong>${pr.substring(0,44)}${pr.length>44?'…':''}</strong><br>
-    <span>QA cover</span>  <strong>${coverage}%</strong><br>
-    <span>Complexity</span><strong>−${complexity}%</strong><br>
-    <span>Tokens saved</span><strong>${ctxSave}%</strong><br>
-    <span>Sec status</span><strong class="v">CLEAR ✓</strong><br>
-    <span>Cost</span>      <strong class="v">${fmt(depCost,2)} ℏ ≈ $${fmt(depCost*HBAR_USD,4)}</strong>
-  `;
-  const approved=await showApproval('🚀 Deploy approval — Stage 3 HITL','All CI gates passed. Review pipeline summary and approve to push to production.',bodyHTML);
-
-  if(!approved){
-    log('dep','t-block','REJECTED','Human rejected deploy. Pipeline halted. No production push.');
-    state.blocked++;setNode(5,'fail');setDot('dep',false);
-    updateMetrics();done(false,'dep');return;
-  }
-
-  log('dep','t-pass','APPROVED','Human approved. Signing deploy transaction.');
-  log('dep','t-pay','PAY',`Micropayment: <span class="hl-d">${fmt(depCost,2)} ℏ</span> → deploy infra <span class="hl">0.0.8891100</span>`);
-  state.spent.dep+=depCost; state.calls++;
-  setNodeCost(5,fmt(depCost,2)+' ℏ');
-  await sleep(600);
-  log('dep','t-pass','DEPLOYED',`✅ Production deploy complete. TxID: <span class="hl-d">0.0.DEP@${Date.now()}</span>`);
-  log('dep','t-hook','S4·HCS',`HCS: DEPLOY PASS · env=production · total_cost=${fmt(totalSpent(),2)}ℏ`);
-  setNode(5,'done'); setDot('dep',false);
-  updateMetrics(); done(true);
 }
 
-function done(success,failedAt){
+function done(success){
   state.running=false;
   document.getElementById('run-btn').disabled=false;
   const status=document.getElementById('pipeline-status');
@@ -857,6 +748,7 @@ function preset(txt){
 
 document.getElementById('pr-input').addEventListener('keydown',e=>{if(e.key==='Enter')runPipeline()});
 updateMetrics();
+connectWs();
 </script>
 </body>
 </html>
