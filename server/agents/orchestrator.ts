@@ -6,10 +6,9 @@ export interface OrchestratorResult {
   outputTokens: number;
 }
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
 /** Pre-execution: the Orchestrator's own call, dispatching the pipeline plan. */
 export async function runOrchestrator(prTitle: string): Promise<OrchestratorResult> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const res = await client.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 512,

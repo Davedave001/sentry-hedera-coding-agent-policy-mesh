@@ -11,10 +11,9 @@ export interface SecurityResult {
   outputTokens: number;
 }
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
 /** Pre-execution: Claude Sonnet 4.6 reviews the change for vulnerabilities. */
 export async function runSecurityScanner(prTitle: string): Promise<SecurityResult> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const res = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 512,
