@@ -9,6 +9,10 @@ import { submitAuditRecord } from './hcs.js';
 export interface PurchaseResult {
   paid: boolean;
   blockedReason?: string;
+  /** Name of the hook that blocked payment, e.g. 'spendCapPolicy' or 'optRoiPolicy'.
+   *  Callers use this to tell a hard cap violation (halt the pipeline) apart from a
+   *  soft outcome-based skip (continue without this stage's payment). */
+  failedHook?: string;
   txId?: string;
   costHbar: number;
 }
@@ -48,7 +52,7 @@ export async function purchaseCall(
         costHbar: stageCtx.callCostHbar,
         timestamp: new Date().toISOString(),
       });
-      return { paid: false, blockedReason: result.reason, costHbar: stageCtx.callCostHbar };
+      return { paid: false, blockedReason: result.reason, failedHook: hook.name, costHbar: stageCtx.callCostHbar };
     }
   }
 
