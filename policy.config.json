@@ -1,0 +1,27 @@
+{
+  "pipelineCapHbar": 50,
+  "hbarUsd": 0.06,
+  "qaCoverageThreshold": 80,
+  "optRoiThreshold": 15,
+  "ctxSavingsThreshold": 20,
+  "agents": {
+    "orch": { "maxPerCallHbar": 8, "model": "claude-opus-4-8", "account": "0.0.4567890" },
+    "qa": { "maxPerCallHbar": 3, "model": "gpt-5.3-codex", "account": "0.0.4567891" },
+    "opt": { "maxPerCallHbar": 2, "model": "deepseek-v4-pro", "account": "0.0.5012987" },
+    "ctx": { "maxPerCallHbar": 0.8, "model": "deepseek-v4-flash", "account": "0.0.5012987" },
+    "sec": { "maxPerCallHbar": 4, "model": "claude-sonnet-4-6", "account": "0.0.4567890" },
+    "dep": { "maxPerCallHbar": 1.5, "model": "claude-haiku-4-5", "account": "0.0.8891100" }
+  },
+  "secondaryPurchases": {
+    "cveFeed": { "maxPerCallHbar": 0.5, "account": "0.0.7771000" },
+    "benchmarkService": { "maxPerCallHbar": 1, "account": "0.0.7772000" }
+  },
+  "allowlistedAccounts": [
+    "0.0.4567890",
+    "0.0.4567891",
+    "0.0.5012987",
+    "0.0.8891100",
+    "0.0.7771000",
+    "0.0.7772000"
+  ]
+}

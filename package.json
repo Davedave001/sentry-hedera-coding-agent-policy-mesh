@@ -1,0 +1,27 @@
+{
+  "name": "hedera-ci-policy-mesh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-agent CI/CD pipeline where each coding agent pays its own Hedera HBAR/USDC micropayment, gated by Hedera Agent Kit Hooks & Policies.",
+  "scripts": {
+    "dev": "tsx watch server/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hashgraph/sdk": "^2.80.0",
+    "dotenv": "^16.4.5",
+    "hedera-agent-kit": "^3.8.2",
+    "ws": "^8.21.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hedera Policy Mesh — CI/CD Agent Orchestra</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#08090d;
+  --s1:#0e1018;
+  --s2:#141720;
+  --s3:#1a1e2a;
+  --border:rgba(255,255,255,0.06);
+  --border2:rgba(255,255,255,0.12);
+  --text:#d4d8e8;
+  --muted:#5a6080;
+  --dim:#2e3348;
+  --mono:'JetBrains Mono','Fira Code',monospace;
+  --sans:-apple-system,'Segoe UI',sans-serif;
+
+  /* Agent brand colors */
+  --orchestrator:#c084fc;
+  --qa:#fb923c;
+  --optimizer:#34d399;
+  --ctx:#38bdf8;
+  --security:#f472b6;
+  --deploy:#a3e635;
+
+  /* Status */
+  --pass:#22c55e;
+  --warn:#f59e0b;
+  --fail:#ef4444;
+  --idle:#3a4060;
+}
+
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;overflow:hidden;height:100vh;display:flex;flex-direction:column}
+
+/* ── TOP BAR ── */
+.bar{
+  height:46px;background:var(--s1);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;
+}
+.bar-logo{font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--orchestrator);display:flex;align-items:center;gap:7px}
+.bar-logo svg{width:18px;height:18px}
+.vr{width:1px;height:20px;background:var(--border2)}
+.bar-sub{font-size:11px;color:var(--muted)}
+.bar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.chip{font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:3px;font-weight:600;letter-spacing:.04em}
+.chip-purple{background:rgba(192,132,252,.1);color:var(--orchestrator);border:1px solid rgba(192,132,252,.2)}
+.chip-green{background:rgba(34,197,94,.1);color:var(--pass);border:1px solid rgba(34,197,94,.2)}
+
+/* ── BODY GRID ── */
+.body{display:grid;grid-template-columns:220px 1fr 260px;flex:1;overflow:hidden}
+
+/* ── LEFT PANEL: pipeline stages ── */
+.left{background:var(--s1);border-right:1px solid var(--border);overflow-y:auto;padding:12px}
+.panel-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;font-weight:600}
+
+.agent-card{
+  border:1px solid var(--border);border-radius:8px;margin-bottom:8px;
+  cursor:pointer;transition:border-color .15s,background .15s;overflow:hidden;
+}
+.agent-card:hover{border-color:var(--border2)}
+.agent-card.active{border-color:var(--c,var(--orchestrator));background:rgba(var(--cr,192,132,252),.04)}
+.agent-head{padding:8px 10px;display:flex;align-items:center;gap:8px}
+.agent-dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex-shrink:0}
+.agent-dot.pulse{animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.agent-name{font-size:11px;font-weight:600;color:var(--text);flex:1}
+.agent-model{font-size:9px;font-family:var(--mono);color:var(--muted)}
+.stage-tag{font-size:9px;font-family:var(--mono);padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.05);color:var(--muted)}
+
+.agent-body{padding:0 10px 8px;display:none}
+.agent-card.active .agent-body{display:block}
+.policy-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:10px;font-family:var(--mono)}
+.policy-key{color:var(--muted)}
+.policy-val{color:var(--text)}
+.policy-val.green{color:var(--pass)}
+.policy-val.amber{color:var(--warn)}
+
+.spend-mini{height:3px;border-radius:2px;background:var(--dim);overflow:hidden;margin:6px 0 4px}
+.spend-mini-fill{height:100%;border-radius:2px;transition:width .5s ease,background .5s}
+
+/* ── CENTRE: live canvas ── */
+.centre{display:flex;flex-direction:column;overflow:hidden;position:relative}
+
+/* Pipeline visualiser */
+.pipeline-vis{
+  height:180px;flex-shrink:0;position:relative;background:var(--s1);
+  border-bottom:1px solid var(--border);padding:12px 16px;overflow:hidden;
+}
+.vis-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;font-weight:600}
+
+.nodes-row{display:flex;align-items:center;gap:0;position:relative;margin-top:8px}
+.pipeline-node{
+  display:flex;flex-direction:column;align-items:center;position:relative;
+  flex:1;cursor:pointer;
+}
+.node-circle{
+  width:44px;height:44px;border-radius:50%;border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;font-size:16px;
+  transition:border-color .3s,box-shadow .3s;position:relative;
+  background:var(--s2);
+}
+.node-circle.active-node{border-color:var(--c);box-shadow:0 0 0 6px rgba(var(--cr),0.1)}
+.node-circle.running-node{border-color:var(--c);animation:ring-pulse 1s infinite}
+@keyframes ring-pulse{0%,100%{box-shadow:0 0 0 3px rgba(var(--cr),.15)}50%{box-shadow:0 0 0 8px rgba(var(--cr),.05)}}
+.node-circle.done-node{border-color:var(--pass);background:rgba(34,197,94,.06)}
+.node-circle.fail-node{border-color:var(--fail);background:rgba(239,68,68,.06)}
+.node-label{font-size:9px;margin-top:5px;color:var(--muted);text-align:center;font-weight:500;letter-spacing:.02em;white-space:nowrap}
+.node-cost{font-size:8px;font-family:var(--mono);color:var(--dim);margin-top:1px}
+
+.connector{flex:1;height:2px;background:var(--dim);position:relative;margin-top:-22px;align-self:flex-start;margin-left:-1px;margin-right:-1px}
+.connector.live{background:var(--pass);animation:flow 1s linear infinite}
+@keyframes flow{from{background-position:-20px 0}to{background-position:0 0}}
+.connector.done-conn{background:var(--pass)}
+
+/* hbar packet animation */
+.hbar-packet{
+  position:absolute;top:-4px;width:8px;height:8px;border-radius:50%;
+  background:var(--warn);box-shadow:0 0 6px var(--warn);
+  animation:packet-fly 1.2s ease-in-out forwards;
+  display:none;
+}
+@keyframes packet-fly{from{left:0}to{left:100%}}
+
+/* ── Log terminal ── */
+.terminal{flex:1;overflow-y:auto;padding:12px 16px;font-family:var(--mono);font-size:11px;background:var(--bg);display:flex;flex-direction:column;gap:1px}
+.log{display:flex;gap:8px;align-items:flex-start;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.02)}
+.log-ts{color:var(--dim);flex-shrink:0;width:44px;font-size:9px;padding-top:2px}
+.log-agent{font-size:9px;font-weight:700;flex-shrink:0;width:80px;letter-spacing:.03em}
+.log-tag{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;flex-shrink:0;letter-spacing:.04em}
+.t-hook{background:rgba(192,132,252,.12);color:var(--orchestrator)}
+.t-policy{background:rgba(245,158,11,.12);color:var(--warn)}
+.t-pass{background:rgba(34,197,94,.12);color:var(--pass)}
+.t-block{background:rgba(239,68,68,.12);color:var(--fail)}
+.t-pay{background:rgba(56,189,248,.12);color:var(--ctx)}
+.t-eval{background:rgba(251,146,60,.12);color:var(--qa)}
+.t-opt{background:rgba(52,211,153,.12);color:var(--optimizer)}
+.t-ctx{background:rgba(56,189,248,.12);color:var(--ctx)}
+.t-sec{background:rgba(244,114,182,.12);color:var(--security)}
+.t-dep{background:rgba(163,230,53,.12);color:var(--deploy)}
+.log-msg{color:var(--text);line-height:1.5;flex:1}
+.hl{color:var(--orchestrator)}
+.hl-g{color:var(--pass)}
+.hl-a{color:var(--warn)}
+.hl-r{color:var(--fail)}
+.hl-b{color:var(--ctx)}
+.hl-o{color:var(--optimizer)}
+.hl-q{color:var(--qa)}
+.hl-s{color:var(--security)}
+.hl-d{color:var(--deploy)}
+
+/* bottom prompt bar */
+.prompt{background:var(--s1);border-top:1px solid var(--border);padding:8px 16px;display:flex;gap:8px;align-items:center;flex-shrink:0}
+.prompt input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:11px;padding:6px 10px;outline:none;transition:border-color .15s}
+.prompt input:focus{border-color:var(--orchestrator)}
+.run-btn{background:var(--orchestrator);color:#08090d;border:none;border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s;letter-spacing:.03em}
+.run-btn:hover{opacity:.85}
+.run-btn:disabled{opacity:.35;cursor:default}
+.preset-btn{background:var(--s2);border:1px solid var(--border);border-radius:5px;padding:5px 9px;font-size:10px;color:var(--muted);cursor:pointer;white-space:nowrap;transition:all .15s;font-family:var(--mono)}
+.preset-btn:hover{border-color:var(--border2);color:var(--text)}
+
+/* ── RIGHT PANEL: policy mesh & spend ── */
+.right{background:var(--s1);border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
+.r-section{padding:12px;border-bottom:1px solid var(--border)}
+
+.hbar-total{font-size:28px;font-weight:700;font-family:var(--mono);color:var(--orchestrator);letter-spacing:-.02em}
+.hbar-sub{font-size:10px;color:var(--muted);margin-top:1px}
+
+.meter-row{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono);margin-bottom:3px;margin-top:6px}
+.meter-track{height:5px;border-radius:3px;background:var(--s3);overflow:hidden}
+.meter-fill{height:100%;border-radius:3px;transition:width .5s ease,background .5s}
+
+.agent-spend-row{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.03);font-size:10px}
+.as-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.as-name{color:var(--text);flex:1}
+.as-hbar{font-family:var(--mono);color:var(--muted)}
+.as-pct{font-family:var(--mono);font-size:9px;color:var(--dim)}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.stat-cell{background:var(--s2);border-radius:6px;padding:8px;border:1px solid var(--border)}
+.stat-num{font-size:18px;font-weight:700;font-family:var(--mono)}
+.stat-key{font-size:9px;color:var(--muted);margin-top:2px;letter-spacing:.03em}
+
+/* policy enforcement list */
+.enforcement-item{
+  padding:6px 8px;border-radius:6px;margin-bottom:4px;
+  background:var(--s2);border:1px solid var(--border);font-size:10px;
+  display:flex;align-items:flex-start;gap:7px;
+}
+.ei-icon{flex-shrink:0;font-size:13px;margin-top:-1px}
+.ei-body{}
+.ei-title{font-weight:600;color:var(--text);margin-bottom:1px}
+.ei-desc{color:var(--muted);line-height:1.5}
+
+/* approval overlay */
+.overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:99;
+  align-items:center;justify-content:center;
+}
+.overlay.show{display:flex}
+.modal{background:var(--s1);border:1px solid var(--border2);border-radius:12px;width:400px;padding:20px;box-shadow:0 24px 80px rgba(0,0,0,.6)}
+.modal h3{font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px}
+.modal p{font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+.modal-body{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:var(--mono);font-size:10px;margin-bottom:14px;line-height:1.9}
+.modal-body span{color:var(--muted)}
+.modal-body strong{color:var(--text)}
+.modal-body .v{color:var(--ctx)}
+.modal-acts{display:flex;gap:8px;justify-content:flex-end}
+.mbtn{border:none;border-radius:6px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer}
+.mbtn-y{background:var(--pass);color:#08090d}
+.mbtn-n{background:rgba(239,68,68,.12);color:var(--fail);border:1px solid rgba(239,68,68,.25)}
+
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<header class="bar">
+  <div class="bar-logo">
+    <svg viewBox="0 0 24 24" fill="none">
+      <path d="M12 2L3 7v10l9 5 9-5V7L12 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M12 2v20M3 7l9 5 9-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+    HEDERA POLICY MESH
+  </div>
+  <div class="vr"></div>
+  <span class="bar-sub">Multi-agent CI/CD orchestrator — spend policies pegged to pipeline stage</span>
+  <div class="bar-right">
+    <span class="chip chip-green" id="pipeline-status">● IDLE</span>
+    <span class="chip chip-purple">v4 SDK · x402</span>
+  </div>
+</header>
+
+<div class="body">
+
+<!-- ── LEFT: AGENTS ── -->
+<aside class="left">
+  <div class="panel-label">Agent mesh</div>
+
+  <!-- Orchestrator -->
+  <div class="agent-card active" style="--c:var(--orchestrator);--cr:192,132,252" onclick="selectAgent('orch',this)">
+    <div class="agent-head">
+      <div class="agent-dot" id="dot-orch"></div>
+      <div>
+        <div class="agent-name">Orchestrator</div>
+        <div class="agent-model">Claude Opus 4.8</div>
+      </div>
+      <span class="stage-tag">Coordinator</span>
+    </div>
+    <div class="agent-body">
+      <div class="policy-row"><span class="policy-key">max/call</span><span class="policy-val" id="op-orch-max">8 ℏ</span></div>
+      <div class="policy-row"><span class="policy-key">stage</span><span class="policy-val">Pre-hook S1</span></div>
+      <div class="policy-row"><span class="policy-key">spent</span><span class="policy-val green" id="op-orch-spent">0.00 ℏ</span></div>
+      <div class="spend-mini"><div class="spend-mini-fill" id="bar-orch" style="width:0%;background:var(--orchestrator)"></div></div>
+    </div>
+  </div>
+
+  <!-- QA Agent -->
+  <div class="agent-card" style="--c:var(--qa);--cr:251,146,60" onclick="selectAgent('qa',this)">
+    <div class="agent-head">
+      <div class="agent-dot" id="dot-qa"></div>
+      <div>
+        <div class="agent-name">QA Evaluator</div>
+        <div class="agent-model">GPT-5.3-Codex</div>
+      </div>
+      <span class="stage-tag">QA Gate</span>
+    </div>
+    <div class="agent-body">
+      <div class="policy-row"><span class="policy-key">max/call</span><span class="policy-val" id="op-qa-max">3 ℏ</span></div>
+      <div class="policy-row"><span class="policy-key">block if</span><span class="policy-val amber">coverage &lt; 80%</span></div>
+      <div class="policy-row"><span class="policy-key">spent</span><span class="policy-val green" id="op-qa-spent">0.00 ℏ</span></div>
+      <div class="spend-mini"><div class="spend-mini-fill" id="bar-qa" style="width:0%;background:var(--qa)"></div></div>
+    </div>
+  </div>
+
+  <!-- Optimizer -->
+  <div class="agent-card" style="--c:var(--optimizer);--cr:52,211,153" onclick="selectAgent('opt',this)">
+    <div class="agent-head">
+      <div class="agent-dot" id="dot-opt"></div>
+      <div>
+        <div class="agent-name">Code Optimizer</div>
+        <div class="agent-model">DeepSeek V4 Pro</div>
+      </div>
+      <span class="stage-tag">CI · Post-QA</span>
+    </div>
+    <div class="agent-body">
+      <div class="policy-row"><span class="policy-key">max/call</span><span class="policy-val" id="op-opt-max">2 ℏ</span></div>
+      <div class="policy-row"><span class="policy-key">only if</span><span class="policy-val green">QA passed</span></div>
+      <div class="policy-row"><span class="policy-key">spent</span><span class="policy-val green" id="op-opt-spent">0.00 ℏ</span></div>
+      <div class="spend-mini"><div class="spend-mini-fill" id="bar-opt" style="width:0%;background:var(--optimizer)"></div></div>
+    </div>
+  </div>
+
+  <!-- Context Reducer -->
+  <div class="agent-card" style="--c:var(--ctx);--cr:56,189,248" onclick="selectAgent('ctx',this)">
+    <div class="agent-head">
+      <div class="agent-dot" id="dot-ctx"></div>
+      <div>
+        <div class="agent-name">Context Reducer</div>
+        <div class="agent-model">DeepSeek V4 Flash</div>
+      </div>
+      <span class="stage-tag">CI · Token opt</span>
+    </div>
+    <div class="agent-body">
+      <div class="policy-row"><span class="policy-key">max/call</span><span class="policy-val" id="op-ctx-max">0.8 ℏ</span></div>
+      <div class="policy-row"><span class="policy-key">block if</span><span class="policy-val amber">savings &lt; 20%</span></div>
+      <div class="policy-row"><span class="policy-key">spent</span><span class="policy-val green" id="op-ctx-spent">0.00 ℏ</span></div>
+      <div class="spend-mini"><div class="spend-mini-fill" id="bar-ctx" style="width:0%;background:var(--ctx)"></div></div>
+    </div>
+  </div>
+
+  <!-- Security Scanner -->
+  <div class="agent-card" style="--c:var(--security);--cr:244,114,182" onclick="selectAgent('sec',this)">
+    <div class="agent-head">
+      <div class="agent-dot" id="dot-sec"></div>
+      <div>
+        <div class="agent-name">Security Scanner</div>
+        <div class="agent-model">Claude Sonnet 4.6</div>
+      </div>
+      <span class="stage-tag">CD Gate</span>
+    </div>
+    <div class="agent-body">
+      <div class="policy-row"><span class="policy-key">max/call</span><span class="policy-val" id="op-sec-max">4 ℏ</span></div>
+      <div class="policy-row"><span class="policy-key">block if</span><span class="policy-val" style="color:var(--fail)">CRITICAL vuln</span></div>
+      <div class="policy-row"><span class="policy-key">approval</span><span class="policy-val amber">&gt; 10 ℏ session</span></div>
+      <div class="spend-mini"><div class="spend-mini-fill" id="bar-sec" style="width:0%;background:var(--security)"></div></div>
+    </div>
+  </div>
+
+  <!-- Deployer -->
+  <div class="agent-card" style="--c:var(--deploy);--cr:163,230,53" onclick="selectAgent('dep',this)">
+    <div class="agent-head">
+      <div class="agent-dot" id="dot-dep"></div>
+      <div>
+        <div class="agent-name">Deployer</div>
+        <div class="agent-model">Claude Haiku 4.5</div>
+      </div>
+      <span class="stage-tag">CD · Final</span>
+    </div>
+    <div class="agent-body">
+      <div class="policy-row"><span class="policy-key">max/call</span><span class="policy-val" id="op-dep-max">1.5 ℏ</span></div>
+      <div class="policy-row"><span class="policy-key">requires</span><span class="policy-val green">sec clearance</span></div>
+      <div class="policy-row"><span class="policy-key">HITL</span><span class="policy-val amber">always</span></div>
+      <div class="spend-mini"><div class="spend-mini-fill" id="bar-dep" style="width:0%;background:var(--deploy)"></div></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ── CENTRE: CANVAS + LOG ── -->
+<main class="centre">
+
+  <!-- Pipeline visualiser -->
+  <div class="pipeline-vis">
+    <div class="vis-label">Pipeline — live execution graph</div>
+    <div class="nodes-row" id="nodes-row">
+
+      <div class="pipeline-node" onclick="selectStage(0)">
+        <div class="node-circle" id="nc-0" style="--c:var(--orchestrator);--cr:192,132,252">🧠</div>
+        <div class="node-label">ORCHESTRATOR</div>
+        <div class="node-cost" id="nc0-cost">—</div>
+      </div>
+
+      <div class="connector" id="conn-0"><div class="hbar-packet" id="pkt-0"></div></div>
+
+      <div class="pipeline-node" onclick="selectStage(1)">
+        <div class="node-circle" id="nc-1" style="--c:var(--qa);--cr:251,146,60">🧪</div>
+        <div class="node-label">QA EVAL</div>
+        <div class="node-cost" id="nc1-cost">—</div>
+      </div>
+
+      <div class="connector" id="conn-1"><div class="hbar-packet" id="pkt-1"></div></div>
+
+      <div class="pipeline-node" onclick="selectStage(2)">
+        <div class="node-circle" id="nc-2" style="--c:var(--optimizer);--cr:52,211,153">⚡</div>
+        <div class="node-label">OPTIMIZER</div>
+        <div class="node-cost" id="nc2-cost">—</div>
+      </div>
+
+      <div class="connector" id="conn-2"><div class="hbar-packet" id="pkt-2"></div></div>
+
+      <div class="pipeline-node" onclick="selectStage(3)">
+        <div class="node-circle" id="nc-3" style="--c:var(--ctx);--cr:56,189,248">📦</div>
+        <div class="node-label">CTX REDUCE</div>
+        <div class="node-cost" id="nc3-cost">—</div>
+      </div>
+
+      <div class="connector" id="conn-3"><div class="hbar-packet" id="pkt-3"></div></div>
+
+      <div class="pipeline-node" onclick="selectStage(4)">
+        <div class="node-circle" id="nc-4" style="--c:var(--security);--cr:244,114,182">🔒</div>
+        <div class="node-label">SECURITY</div>
+        <div class="node-cost" id="nc4-cost">—</div>
+      </div>
+
+      <div class="connector" id="conn-4"><div class="hbar-packet" id="pkt-4"></div></div>
+
+      <div class="pipeline-node" onclick="selectStage(5)">
+        <div class="node-circle" id="nc-5" style="--c:var(--deploy);--cr:163,230,53">🚀</div>
+        <div class="node-label">DEPLOY</div>
+        <div class="node-cost" id="nc5-cost">—</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div class="terminal" id="term">
+    <div class="log">
+      <span class="log-ts">00:00</span>
+      <span class="log-agent" style="color:var(--orchestrator)">MESH</span>
+      <span class="log-tag t-hook">INIT</span>
+      <span class="log-msg">Policy Mesh initialized. 5 agents registered. Spend policies pegged to pipeline stage. HCS audit enabled.</span>
+    </div>
+    <div class="log">
+      <span class="log-ts">00:00</span>
+      <span class="log-agent" style="color:var(--orchestrator)">POLICY</span>
+      <span class="log-tag t-hook">HOOKS</span>
+      <span class="log-msg">Stage hooks: <span class="hl">SpendCap·S1</span> → <span class="hl-q">QACoverageGate·S2</span> → <span class="hl-o">OptROIPolicy·S2</span> → <span class="hl-b">CtxSavingsPolicy·S2</span> → <span class="hl-s">SecClearancePolicy·S3</span> → <span class="hl-d">DeployHITL·S3</span> → <span class="hl">AuditHCS·S4</span></span>
+    </div>
+    <div class="log">
+      <span class="log-ts">00:00</span>
+      <span class="log-agent" style="color:var(--muted)">READY</span>
+      <span class="log-tag t-pass">STANDBY</span>
+      <span class="log-msg">Submit a PR or select a preset to trigger the pipeline. Each agent pays its own HBAR policy-gated API call.</span>
+    </div>
+  </div>
+
+  <!-- Prompt / presets -->
+  <div class="prompt">
+    <button class="preset-btn" onclick="preset('Fix: race condition in job queue')">race condition fix</button>
+    <button class="preset-btn" onclick="preset('Feat: EUDR certificate validator')">EUDR feature</button>
+    <button class="preset-btn" onclick="preset('Refactor: reduce auth token context')">auth refactor</button>
+    <input type="text" id="pr-input" placeholder='PR title or commit message… e.g. "Add HBAR payment hook to traceability module"'>
+    <button class="run-btn" id="run-btn" onclick="runPipeline()">▶ Run CI/CD</button>
+  </div>
+</main>
+
+<!-- ── RIGHT: SPEND + POLICY ENFORCEMENT ── -->
+<aside class="right">
+
+  <div class="r-section">
+    <div class="panel-label">Total HBAR spent</div>
+    <div class="hbar-total" id="total-hbar">0.00 <span style="font-size:16px;color:var(--muted)">ℏ</span></div>
+    <div class="hbar-sub" id="total-usd">≈ $0.000 USD · 1 ℏ = $0.060</div>
+    <div class="meter-row"><span id="meter-used">0.00 ℏ used</span><span id="meter-cap">50 ℏ pipeline cap</span></div>
+    <div class="meter-track"><div class="meter-fill" id="global-bar" style="width:0%;background:var(--pass)"></div></div>
+  </div>
+
+  <div class="r-section">
+    <div class="panel-label">Spend by agent</div>
+    <div id="agent-spend-rows">
+      <div class="agent-spend-row"><div class="as-dot" style="background:var(--orchestrator)"></div><span class="as-name">Orchestrator</span><span class="as-hbar" id="rs-orch">0.00 ℏ</span><span class="as-pct" id="rp-orch">—</span></div>
+      <div class="agent-spend-row"><div class="as-dot" style="background:var(--qa)"></div><span class="as-name">QA Evaluator</span><span class="as-hbar" id="rs-qa">0.00 ℏ</span><span class="as-pct" id="rp-qa">—</span></div>
+      <div class="agent-spend-row"><div class="as-dot" style="background:var(--optimizer)"></div><span class="as-name">Code Optimizer</span><span class="as-hbar" id="rs-opt">0.00 ℏ</span><span class="as-pct" id="rp-opt">—</span></div>
+      <div class="agent-spend-row"><div class="as-dot" style="background:var(--ctx)"></div><span class="as-name">Context Reducer</span><span class="as-hbar" id="rs-ctx">0.00 ℏ</span><span class="as-pct" id="rp-ctx">—</span></div>
+      <div class="agent-spend-row"><div class="as-dot" style="background:var(--security)"></div><span class="as-name">Security Scanner</span><span class="as-hbar" id="rs-sec">0.00 ℏ</span><span class="as-pct" id="rp-sec">—</span></div>
+      <div class="agent-spend-row"><div class="as-dot" style="background:var(--deploy)"></div><span class="as-name">Deployer</span><span class="as-hbar" id="rs-dep">0.00 ℏ</span><span class="as-pct" id="rp-dep">—</span></div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-cell"><div class="stat-num" id="st-calls" style="color:var(--orchestrator)">0</div><div class="stat-key">API CALLS</div></div>
+      <div class="stat-cell"><div class="stat-num" id="st-blocked" style="color:var(--fail)">0</div><div class="stat-key">BLOCKED</div></div>
+      <div class="stat-cell"><div class="stat-num" id="st-tokens" style="color:var(--pass)">0K</div><div class="stat-key">TOKENS SAVED</div></div>
+      <div class="stat-cell"><div class="stat-num" id="st-runs" style="color:var(--warn)">0</div><div class="stat-key">RUNS</div></div>
+    </div>
+  </div>
+
+  <div class="r-section" style="flex:1;border-bottom:none">
+    <div class="panel-label">Active policies</div>
+    <div class="enforcement-item">
+      <span class="ei-icon">💰</span>
+      <div class="ei-body"><div class="ei-title">SpendCap · Stage 1</div><div class="ei-desc">Per-agent call cap enforced before any transaction is built. Blocks overspend before tokens hit the wire.</div></div>
+    </div>
+    <div class="enforcement-item">
+      <span class="ei-icon">🧪</span>
+      <div class="ei-body"><div class="ei-title">QACoverageGate · Stage 2</div><div class="ei-desc">Pipeline advances only if QA agent returns coverage ≥ 80%. Low coverage blocks Optimizer spend.</div></div>
+    </div>
+    <div class="enforcement-item">
+      <span class="ei-icon">⚡</span>
+      <div class="ei-body"><div class="ei-title">OptROIPolicy · Stage 2</div><div class="ei-desc">Optimization spend blocked if projected complexity savings &lt; 15%. Prevents expensive no-op refactors.</div></div>
+    </div>
+    <div class="enforcement-item">
+      <span class="ei-icon">📦</span>
+      <div class="ei-body"><div class="ei-title">CtxSavingsPolicy · Stage 2</div><div class="ei-desc">Context reducer only pays if token savings ≥ 20%. ROI-gated micropayment on every run.</div></div>
+    </div>
+    <div class="enforcement-item">
+      <span class="ei-icon">🔒</span>
+      <div class="ei-body"><div class="ei-title">SecClearancePolicy · Stage 3</div><div class="ei-desc">CRITICAL vulnerabilities block Deployer spend. Agent cannot proceed without security sign-off.</div></div>
+    </div>
+    <div class="enforcement-item">
+      <span class="ei-icon">🚀</span>
+      <div class="ei-body"><div class="ei-title">DeployHITL · Stage 3</div><div class="ei-desc">Deploy always requires human approval. Unsigned tx bytes surfaced for review before any production push.</div></div>
+    </div>
+  </div>
+</aside>
+</div>
+
+<!-- APPROVAL OVERLAY -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="modal-title">⚡ Human approval required</h3>
+    <p id="modal-p">This action requires explicit sign-off before the HBAR payment is submitted.</p>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-acts">
+      <button class="mbtn mbtn-n" onclick="resolveApproval(false)">Reject pipeline</button>
+      <button class="mbtn mbtn-y" onclick="resolveApproval(true)">Approve &amp; deploy</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ──
+const HBAR_USD = 0.06;
+const PIPELINE_CAP = 50;
+
+const AGENTS = {
+  orch: { name:'Orchestrator', color:'var(--orchestrator)', model:'Claude Opus 4.8',  cap:8,   inputK:25, outputK:6,   inputUSD:25,   outputUSD:25,  label:'rs-orch', pct:'rp-orch', bar:'bar-orch', spent:'op-orch-spent', dot:'dot-orch' },
+  qa:   { name:'QA Evaluator', color:'var(--qa)',           model:'GPT-5.3-Codex',     cap:3,   inputK:20, outputK:5,   inputUSD:1.75, outputUSD:14,  label:'rs-qa',   pct:'rp-qa',   bar:'bar-qa',  spent:'op-qa-spent',   dot:'dot-qa'   },
+  opt:  { name:'Code Optimizer',color:'var(--optimizer)',   model:'DeepSeek V4 Pro',   cap:2,   inputK:22, outputK:6,   inputUSD:1.74, outputUSD:3.48,label:'rs-opt',  pct:'rp-opt',  bar:'bar-opt', spent:'op-opt-spent',  dot:'dot-opt'  },
+  ctx:  { name:'Ctx Reducer',   color:'var(--ctx)',         model:'DeepSeek V4 Flash', cap:0.8, inputK:18, outputK:4,   inputUSD:0.14, outputUSD:0.28,label:'rs-ctx',  pct:'rp-ctx',  bar:'bar-ctx', spent:'op-ctx-spent',  dot:'dot-ctx'  },
+  sec:  { name:'Security',      color:'var(--security)',    model:'Claude Sonnet 4.6', cap:4,   inputK:22, outputK:5,   inputUSD:3,    outputUSD:15,  label:'rs-sec',  pct:'rp-sec',  bar:'bar-sec', spent:'op-sec-spent',  dot:'dot-sec'  },
+  dep:  { name:'Deployer',      color:'var(--deploy)',      model:'Claude Haiku 4.5',  cap:1.5, inputK:10, outputK:2,   inputUSD:0.8,  outputUSD:4,   label:'rs-dep',  pct:'rp-dep',  bar:'bar-dep', spent:'op-dep-spent',  dot:'dot-dep'  },
+};
+
+const state = {
+  spent: {orch:0,qa:0,opt:0,ctx:0,sec:0,dep:0},
+  calls:0, blocked:0, tokensSaved:0, runs:0,
+  running:false, approvalResolve:null,
+};
+
+// ── Helpers ──
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+function fmt(n,d=2){return Number(n).toFixed(d)}
+function ts(){const n=new Date();return `${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')}`}
+function hbar(agent){const a=AGENTS[agent];return (a.inputK/1000*a.inputUSD + a.outputK/1000*a.outputUSD)/HBAR_USD}
+function totalSpent(){return Object.values(state.spent).reduce((a,b)=>a+b,0)}
+
+// ── Log ──
+function log(agentKey,tagClass,tagText,msg){
+  const t=document.getElementById('term');
+  const a=AGENTS[agentKey]||{name:agentKey,color:'var(--muted)'};
+  const el=document.createElement('div');el.className='log';
+  el.innerHTML=`<span class="log-ts">${ts()}</span><span class="log-agent" style="color:${a.color}">${a.name.toUpperCase().slice(0,10)}</span><span class="log-tag ${tagClass}">${tagText}</span><span class="log-msg">${msg}</span>`;
+  t.appendChild(el);t.scrollTop=t.scrollHeight;
+}
+
+// ── Node states ──
+function setNode(i,state_){
+  const nc=document.getElementById(`nc-${i}`);
+  nc.className='node-circle';
+  if(state_==='run')nc.classList.add('running-node');
+  else if(state_==='done')nc.classList.add('done-node');
+  else if(state_==='fail')nc.classList.add('fail-node');
+  else if(state_==='active')nc.classList.add('active-node');
+}
+function setConn(i,state_){
+  const c=document.getElementById(`conn-${i}`);if(!c)return;
+  c.className='connector';
+  if(state_==='live')c.classList.add('live');
+  else if(state_==='done')c.classList.add('done-conn');
+}
+function setNodeCost(i,txt){document.getElementById(`nc${i}-cost`).textContent=txt}
+
+// ── HBAR packet animation ──
+function firePacket(i){
+  const p=document.getElementById(`pkt-${i}`);if(!p)return;
+  p.style.display='block';
+  p.style.animation='none';
+  void p.offsetWidth;
+  p.style.animation='packet-fly 1.2s ease-in-out forwards';
+  setTimeout(()=>{p.style.display='none'},1300);
+}
+
+// ── Dot pulse ──
+function setDot(key,on){
+  const d=document.getElementById('dot-'+key);
+  if(on)d.classList.add('pulse');else d.classList.remove('pulse');
+}
+
+// ── Metrics ──
+function updateMetrics(){
+  const tot=totalSpent();
+  document.getElementById('total-hbar').innerHTML=`${fmt(tot)} <span style="font-size:16px;color:var(--muted)">ℏ</span>`;
+  document.getElementById('total-usd').textContent=`≈ $${fmt(tot*HBAR_USD,3)} USD · 1 ℏ = $${HBAR_USD}`;
+  const pct=Math.min(100,tot/PIPELINE_CAP*100);
+  const bar=document.getElementById('global-bar');
+  bar.style.width=pct+'%';
+  bar.style.background=pct>85?'var(--fail)':pct>60?'var(--warn)':'var(--pass)';
+  document.getElementById('meter-used').textContent=`${fmt(tot)} ℏ used`;
+  document.getElementById('st-calls').textContent=state.calls;
+  document.getElementById('st-blocked').textContent=state.blocked;
+  document.getElementById('st-tokens').textContent=state.tokensSaved+'K';
+  document.getElementById('st-runs').textContent=state.runs;
+
+  let total=tot||1;
+  for(const [k,a] of Object.entries(AGENTS)){
+    const s=state.spent[k]||0;
+    const pct2=Math.min(100,s/(a.cap*3)*100);
+    document.getElementById(a.label).textContent=fmt(s)+' ℏ';
+    document.getElementById(a.pct).textContent=tot>0?fmt(s/tot*100,0)+'%':'—';
+    document.getElementById(a.bar).style.width=pct2+'%';
+    const el=document.getElementById(a.spent);
+    if(el)el.textContent=fmt(s)+' ℏ';
+  }
+}
+
+// ── Approval modal ──
+function showApproval(title,p,bodyHTML){
+  return new Promise(res=>{
+    state.approvalResolve=res;
+    document.getElementById('modal-title').textContent=title;
+    document.getElementById('modal-p').textContent=p;
+    document.getElementById('modal-body').innerHTML=bodyHTML;
+    document.getElementById('overlay').classList.add('show');
+  });
+}
+function resolveApproval(v){
+  document.getElementById('overlay').classList.remove('show');
+  if(state.approvalResolve)state.approvalResolve(v);
+}
+
+// ── Agent card selection ──
+function selectAgent(key,el){
+  document.querySelectorAll('.agent-card').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+}
+function selectStage(i){
+  const keys=['orch','qa','opt','ctx','sec','dep'];
+  const cards=document.querySelectorAll('.agent-card');
+  cards.forEach((c,idx)=>{
+    c.classList.toggle('active',idx===i);
+  });
+}
+
+// ── Pipeline runner ──
+async function runPipeline(){
+  if(state.running)return;
+  const pr=document.getElementById('pr-input').value.trim();
+  if(!pr)return;
+  state.running=true;
+  state.runs++;
+  document.getElementById('run-btn').disabled=true;
+  document.getElementById('pipeline-status').textContent='● RUNNING';
+  document.getElementById('pipeline-status').style.color='var(--warn)';
+  document.getElementById('pr-input').value='';
+
+  // reset nodes
+  for(let i=0;i<6;i++){setNode(i,'');setNodeCost(i,'—');}
+  for(let i=0;i<5;i++)setConn(i,'');
+
+  // randomise scenario params
+  const coverage  = 60+Math.floor(Math.random()*38);    // 60–97%
+  const complexity= 10+Math.floor(Math.random()*30);    // 10–39% improvement
+  const ctxSave   = 15+Math.floor(Math.random()*35);    // 15–49% token savings
+  const hasVuln   = Math.random()<0.25;                  // 25% chance critical vuln
+
+  // ─────────────────────────────────────────────
+  // STAGE 0: ORCHESTRATOR
+  // ─────────────────────────────────────────────
+  setNode(0,'run'); setDot('orch',true);
+  log('orch','t-hook','S1·SPEND',`SpendCap check — call cost: <span class="hl-a">${fmt(hbar('orch'),2)} ℏ</span> · cap: <span class="hl">8 ℏ</span>`);
+  await sleep(400);
+
+  if(hbar('orch')>AGENTS.orch.cap){
+    log('orch','t-block','BLOCKED','SpendCap — Orchestrator call exceeds cap. Pipeline aborted.');
+    state.blocked++;setNode(0,'fail');setDot('orch',false);done(false);return;
+  }
+  log('orch','t-pass','PASSED',`SpendCap ✓ — submitting <span class="hl-a">${fmt(hbar('orch'),2)} ℏ</span> → <span class="hl">0.0.4567890 (Claude)</span>`);
+  await sleep(350);
+  firePacket(0);
+  log('orch','t-hook','S4·HCS',`Audit written to HCS <span class="hl">0.0.9871234</span> — orchestrator invocation logged`);
+  state.spent.orch+=hbar('orch'); state.calls++;
+  setNodeCost(0,fmt(hbar('orch'),2)+' ℏ');
+  await sleep(500);
+  log('orch','t-hook','PLAN',`Orchestrator analysed PR "<span class="hl">${pr}</span>". Dispatching to QA → Optimizer → CtxReducer → Security → Deploy`);
+  setNode(0,'done'); setDot('orch',false); setConn(0,'live');
+  updateMetrics(); await sleep(400);
+
+  // ─────────────────────────────────────────────
+  // STAGE 1: QA EVALUATOR
+  // ─────────────────────────────────────────────
+  setConn(0,'done'); setNode(1,'run'); setDot('qa',true);
+  log('qa','t-hook','S1·SPEND',`SpendCap check — call cost: <span class="hl-a">${fmt(hbar('qa'),2)} ℏ</span> · cap: <span class="hl-q">3 ℏ</span>`);
+  await sleep(350);
+
+  if(hbar('qa')>AGENTS.qa.cap){
+    log('qa','t-block','BLOCKED','QA call exceeds per-agent cap. Aborting.');
+    state.blocked++;setNode(1,'fail');setDot('qa',false);done(false);return;
+  }
+  log('qa','t-pass','PASSED',`SpendCap ✓ → paying <span class="hl-q">${fmt(hbar('qa'),2)} ℏ</span>`);
+  firePacket(1);
+  state.spent.qa+=hbar('qa'); state.calls++;
+  setNodeCost(1,fmt(hbar('qa'),2)+' ℏ');
+  await sleep(600);
+
+  log('qa','t-eval','EVAL',`Running test suite… coverage result: <span class="${coverage>=80?'hl-g':'hl-r'}">${coverage}%</span>`);
+  await sleep(400);
+
+  // QA Coverage Policy (S2 — post-param normalization)
+  log('qa','t-policy','S2·QA',`QACoverageGate — threshold: 80% · actual: <span class="${coverage>=80?'hl-g':'hl-r'}">${coverage}%</span>`);
+  await sleep(300);
+
+  if(coverage<80){
+    log('qa','t-block','BLOCKED',`QACoverageGate: coverage ${coverage}% < 80%. Optimizer + CtxReducer spend BLOCKED. Pipeline must fix tests before advancing.`);
+    state.blocked++;setNode(1,'fail');setDot('qa',false);
+    log('qa','t-hook','S4·HCS',`HCS audit: QA FAIL · coverage=${coverage}% · pipeline halted`);
+    done(false,'qa');return;
+  }
+  log('qa','t-pass','GATE✓',`QACoverageGate passed — ${coverage}% ≥ 80%. Authorising Optimizer spend.`);
+  log('qa','t-hook','S4·HCS',`HCS: QA PASS · coverage=${coverage}% · txID=0.0.QA@${Date.now()}`);
+  setNode(1,'done'); setDot('qa',false); setConn(1,'live');
+  updateMetrics(); await sleep(350);
+
+  // ─────────────────────────────────────────────
+  // STAGE 2: CODE OPTIMIZER
+  // ─────────────────────────────────────────────
+  setConn(1,'done'); setNode(2,'run'); setDot('opt',true);
+  log('opt','t-hook','S1·SPEND',`SpendCap check — call cost: <span class="hl-a">${fmt(hbar('opt'),2)} ℏ</span> · cap: <span class="hl-o">2 ℏ</span>`);
+  await sleep(300);
+
+  if(hbar('opt')>AGENTS.opt.cap){
+    log('opt','t-block','BLOCKED','Optimizer call exceeds cap.');
+    state.blocked++;setNode(2,'fail');setDot('opt',false);done(false);return;
+  }
+
+  // OptROI Policy (S2)
+  log('opt','t-policy','S2·ROI',`OptROIPolicy — projected complexity reduction: <span class="${complexity>=15?'hl-g':'hl-r'}">${complexity}%</span> · threshold: 15%`);
+  await sleep(350);
+  if(complexity<15){
+    log('opt','t-block','BLOCKED',`OptROIPolicy: ${complexity}% improvement below 15% threshold. Optimization spend not justified. Skipping.`);
+    state.blocked++;setNode(2,'fail');setDot('opt',false);setConn(2,'done');
+    updateMetrics();
+    // continue to ctx reducer still
+    await sleep(200);
+  } else {
+    log('opt','t-pass','GATE✓',`OptROIPolicy passed — ${complexity}% ≥ 15%. Proceeding.`);
+    log('opt','t-pass','PASSED',`Paying <span class="hl-o">${fmt(hbar('opt'),2)} ℏ</span> → DeepSeek V4 Pro <span class="hl">0.0.5012987</span>`);
+    firePacket(2);
+    state.spent.opt+=hbar('opt'); state.calls++;
+    setNodeCost(2,fmt(hbar('opt'),2)+' ℏ');
+    await sleep(700);
+    log('opt','t-opt','RESULT',`Optimizer reduced cyclomatic complexity by <span class="hl-g">${complexity}%</span>. Dead code removed. PRs generated.`);
+    log('opt','t-hook','S4·HCS',`HCS: OPT PASS · complexity_reduction=${complexity}% · cost=${fmt(hbar('opt'),2)}ℏ`);
+    setNode(2,'done'); setDot('opt',false); setConn(2,'done');
+    updateMetrics(); await sleep(300);
+  }
+
+  // ─────────────────────────────────────────────
+  // STAGE 3: CONTEXT REDUCER
+  // ─────────────────────────────────────────────
+  setNode(3,'run'); setDot('ctx',true);
+  log('ctx','t-hook','S1·SPEND',`SpendCap check — <span class="hl-a">${fmt(hbar('ctx'),2)} ℏ</span> · cap: <span class="hl-b">0.8 ℏ</span>`);
+  await sleep(300);
+
+  // CtxSavings Policy (S2)
+  const tokensSaved=Math.floor(ctxSave*0.8);
+  log('ctx','t-policy','S2·CTX',`CtxSavingsPolicy — projected token savings: <span class="${ctxSave>=20?'hl-g':'hl-r'}">${ctxSave}%</span> (${tokensSaved}K tokens) · threshold: 20%`);
+  await sleep(350);
+
+  if(ctxSave<20){
+    log('ctx','t-block','BLOCKED',`CtxSavingsPolicy: ${ctxSave}% savings below 20% threshold. Not cost-effective. Micropayment skipped.`);
+    state.blocked++;setNode(3,'fail');setDot('ctx',false);setConn(3,'done');
+    updateMetrics();await sleep(200);
+  } else {
+    log('ctx','t-pass','GATE✓',`CtxSavingsPolicy passed — ${ctxSave}% ≥ 20%. Paying context reduction fee.`);
+    log('ctx','t-pay','PAY',`Micropayment: <span class="hl-b">${fmt(hbar('ctx'),2)} ℏ</span> → DeepSeek V4 Flash <span class="hl">0.0.5012987</span>`);
+    firePacket(3);
+    state.spent.ctx+=hbar('ctx'); state.calls++; state.tokensSaved+=tokensSaved;
+    setNodeCost(3,fmt(hbar('ctx'),2)+' ℏ');
+    await sleep(600);
+    log('ctx','t-ctx','RESULT',`Context reduced by <span class="hl-g">${ctxSave}%</span> — <span class="hl-b">${tokensSaved}K tokens</span> saved across future agent calls. Downstream API costs cut.`);
+    log('ctx','t-hook','S4·HCS',`HCS: CTX PASS · tokens_saved=${tokensSaved}K · cost=${fmt(hbar('ctx'),2)}ℏ`);
+    setNode(3,'done'); setDot('ctx',false); setConn(3,'done');
+    updateMetrics(); await sleep(300);
+  }
+
+  // ─────────────────────────────────────────────
+  // STAGE 4: SECURITY SCANNER
+  // ─────────────────────────────────────────────
+  setConn(3,'live');await sleep(100);setConn(3,'done');
+  setNode(4,'run'); setDot('sec',true);
+  log('sec','t-hook','S1·SPEND',`SpendCap check — <span class="hl-a">${fmt(hbar('sec'),2)} ℏ</span> · cap: <span style="color:var(--security)">4 ℏ</span>`);
+  await sleep(350);
+  log('sec','t-pass','PASSED',`Paying <span style="color:var(--security)">${fmt(hbar('sec'),2)} ℏ</span> → Claude Sonnet 4.6 <span class="hl">0.0.4567890</span>`);
+  firePacket(4);
+  state.spent.sec+=hbar('sec'); state.calls++;
+  setNodeCost(4,fmt(hbar('sec'),2)+' ℏ');
+  await sleep(700);
+
+  if(hasVuln){
+    log('sec','t-block','CRITICAL',`⛔ CRITICAL vulnerability detected — SQL injection in auth handler. SecClearancePolicy BLOCKED deploy spend. Pipeline halted.`);
+    state.blocked++;
+    log('sec','t-policy','S3·SEC',`SecClearancePolicy — CRITICAL vuln present → Deployer HBAR payment blocked at Stage 3.`);
+    log('sec','t-hook','S4·HCS',`HCS: SEC FAIL · vuln=CRITICAL · deploy_blocked=true · cost=${fmt(hbar('sec'),2)}ℏ`);
+    setNode(4,'fail'); setDot('sec',false);
+    updateMetrics(); done(false,'sec'); return;
+  }
+
+  log('sec','t-pass','CLEAR',`No critical vulnerabilities detected. <span style="color:var(--security)">Security clearance issued.</span> Issuing deploy token to Deployer agent.`);
+  log('sec','t-hook','S4·HCS',`HCS: SEC PASS · clearance_token=0x${Math.random().toString(16).slice(2,10)} · cost=${fmt(hbar('sec'),2)}ℏ`);
+  setNode(4,'done'); setDot('sec',false); setConn(4,'live');
+  updateMetrics(); await sleep(350);
+
+  // ─────────────────────────────────────────────
+  // STAGE 5: DEPLOYER (always HITL)
+  // ─────────────────────────────────────────────
+  setConn(4,'done'); setNode(5,'run'); setDot('dep',true);
+  log('dep','t-policy','S3·HITL',`DeployHITL — always-on approval gate. Surfacing unsigned tx bytes for human review.`);
+  await sleep(400);
+
+  const depCost=hbar('dep');
+  const bodyHTML=`
+    <span>Agent</span>     <strong>Deployer (Claude Haiku 4.5)</strong><br>
+    <span>Recipient</span> <strong class="v">0.0.8891100 (deploy infra)</strong><br>
+    <span>PR</span>        <strong>${pr.substring(0,44)}${pr.length>44?'…':''}</strong><br>
+    <span>QA cover</span>  <strong>${coverage}%</strong><br>
+    <span>Complexity</span><strong>−${complexity}%</strong><br>
+    <span>Tokens saved</span><strong>${ctxSave}%</strong><br>
+    <span>Sec status</span><strong class="v">CLEAR ✓</strong><br>
+    <span>Cost</span>      <strong class="v">${fmt(depCost,2)} ℏ ≈ $${fmt(depCost*HBAR_USD,4)}</strong>
+  `;
+  const approved=await showApproval('🚀 Deploy approval — Stage 3 HITL','All CI gates passed. Review pipeline summary and approve to push to production.',bodyHTML);
+
+  if(!approved){
+    log('dep','t-block','REJECTED','Human rejected deploy. Pipeline halted. No production push.');
+    state.blocked++;setNode(5,'fail');setDot('dep',false);
+    updateMetrics();done(false,'dep');return;
+  }
+
+  log('dep','t-pass','APPROVED','Human approved. Signing deploy transaction.');
+  log('dep','t-pay','PAY',`Micropayment: <span class="hl-d">${fmt(depCost,2)} ℏ</span> → deploy infra <span class="hl">0.0.8891100</span>`);
+  state.spent.dep+=depCost; state.calls++;
+  setNodeCost(5,fmt(depCost,2)+' ℏ');
+  await sleep(600);
+  log('dep','t-pass','DEPLOYED',`✅ Production deploy complete. TxID: <span class="hl-d">0.0.DEP@${Date.now()}</span>`);
+  log('dep','t-hook','S4·HCS',`HCS: DEPLOY PASS · env=production · total_cost=${fmt(totalSpent(),2)}ℏ`);
+  setNode(5,'done'); setDot('dep',false);
+  updateMetrics(); done(true);
+}
+
+function done(success,failedAt){
+  state.running=false;
+  document.getElementById('run-btn').disabled=false;
+  const status=document.getElementById('pipeline-status');
+  if(success){status.textContent='● PASSED';status.style.color='var(--pass)';}
+  else{status.textContent='● FAILED';status.style.color='var(--fail)';}
+  setTimeout(()=>{status.textContent='● IDLE';status.style.color='';},4000);
+}
+
+function preset(txt){
+  document.getElementById('pr-input').value=txt;
+}
+
+document.getElementById('pr-input').addEventListener('keydown',e=>{if(e.key==='Enter')runPipeline()});
+updateMetrics();
+</script>
+</body>
+</html>
