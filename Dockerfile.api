@@ -1,7 +1,10 @@
 # API container: server/index.ts (HTTP + WebSocket) and the MCP server share this
-# image. Deploy with Coolify pointing at this Dockerfile, mapped to
-# sentry-api.agentikiq.com, with a real .env (see .env.example) supplied via
-# Coolify's environment variables UI — never bake secrets into the image.
+# image. Deploy with Coolify pointing at this Dockerfile, mapped to whichever
+# domain your DNS actually has an A/CNAME record for (e.g. api-sentry.agentikiq.com
+# — double-check the exact subdomain spelling against your DNS provider before
+# assuming it matches any default in this repo), with a real .env (see
+# .env.example) supplied via Coolify's environment variables UI — never bake
+# secrets into the image.
 
 FROM node:22-alpine AS build
 WORKDIR /app

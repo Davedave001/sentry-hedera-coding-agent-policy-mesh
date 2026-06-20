@@ -5,7 +5,7 @@
 # instead of resolving relative to this static frontend's origin.
 set -eu
 
-API_ORIGIN="${API_ORIGIN:-https://sentry-api.agentikiq.com}"
+API_ORIGIN="${API_ORIGIN:-https://api-sentry.agentikiq.com}"
 
 envsubst '${API_ORIGIN}' \
   < /usr/share/nginx/html/index.html.template \
