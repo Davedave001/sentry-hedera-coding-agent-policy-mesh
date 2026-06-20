@@ -1,5 +1,40 @@
 # Hedera CI/CD Policy Mesh — Implementation Plan
 
+## Why this matters: the token cost crisis
+
+The "tokenmaxxing" era — corporate incentives and leaderboards rewarding raw AI
+usage — is over. Uber, Meta, and Microsoft have all hit real bill shock from
+unmonitored agentic workflows and are clamping down. The failure mode has three
+parts: **agentic sprawl** (autonomous agents running for hours, triggering hundreds
+of redundant LLM calls with no circuit breaker), **uncapped API costs** (pay-per-
+token billing is a blind spot until the invoice arrives), and **verbose prompts**
+(unpruned context and bloated payloads inflating every call).
+
+The industry's response has four strategies, and this plan's six-policy design maps
+onto all four directly — not as an afterthought, but as the reason the policy mesh
+is shaped the way it is:
+
+1. **"Tokenminimizing" metrics** (hard $ allowance per dev/agent, not a usage
+   leaderboard) → `SpendCapPolicy` (§6) enforces `maxPerCallHbar` and
+   `pipelineCapHbar` *before* a call is paid for, with every decision logged
+   immutably to HCS (§8) — spend is auditable in real time, not reconciled after
+   the bill.
+2. **Optimize data & prompts** (caching, flattened payloads, pruning context) → the
+   Context Reducer stage exists for exactly this, and `CtxSavingsPolicy` makes it
+   self-gating: the stage only gets paid if it actually saves ≥20% tokens (§2 Case A,
+   §6).
+3. **Model routing gateways** (cheap models for routine work, frontier models
+   reserved for hard problems) → the six-agent mesh's model assignment *is* a
+   routing gateway — DeepSeek Flash/Pro for routine stages, Claude Opus reserved for
+   the Orchestrator's actual reasoning — enforced economically via per-agent HBAR
+   caps, not left to convention (§4 tech stack, policy.config.json).
+4. **Open-weight models / self-hosting** → two of six stages already run on
+   DeepSeek (open-weight); every agent adapter (§7) is a thin, provider-agnostic
+   wrapper, so pointing any stage at a self-hosted endpoint is a one-file change
+   with zero changes to the policy layer.
+
+---
+
 ## 0. What exists today vs. what this plan builds
 
 `hedera_ci_policy_mesh.html` is a **fully client-side simulation**. It already has the
