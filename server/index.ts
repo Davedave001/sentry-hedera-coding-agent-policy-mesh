@@ -2,7 +2,6 @@ import 'dotenv/config';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createHederaClient, buildContext, AgentMode } from './kit/agentKit.js';
@@ -11,9 +10,14 @@ import type { EventSink, PipelineEvent } from './events.js';
 import type { PolicyConfig } from './kit/hooks/types.js';
 import type { DeploySummary } from './kit/hooks/deployHitl.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '..');
+// Resolved from cwd, not __dirname: __dirname differs by one directory level
+// between `tsx server/index.ts` (dev) and `node dist/server/index.js` (Docker CMD),
+// since tsc's outDir mirrors the source tree under dist/. Both entrypoints are
+// expected to be launched from the project root.
+const PROJECT_ROOT = process.cwd();
 const PORT = Number(process.env.PORT ?? 8787);
+/** Origin of the standalone frontend container in the split deployment (see Dockerfile.frontend). */
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? 'https://sentry-coding-policy-agent.agentikiq.com';
 
 const cfg: PolicyConfig = JSON.parse(readFileSync(path.join(PROJECT_ROOT, 'policy.config.json'), 'utf-8'));
 const client = createHederaClient();
@@ -22,10 +26,36 @@ const state = createPipelineState();
 let running = false;
 const pendingApprovals = new Map<string, (approved: boolean) => void>();
 
+function setCorsHeaders(res: http.ServerResponse): void {
+  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
 const server = http.createServer(async (req, res) => {
+  setCorsHeaders(res);
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', running }));
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/') {
+    // Dev/monolith convenience only — the split-container deployment serves this
+    // file from a separate frontend container (Dockerfile.frontend), not from here.
+    const html = readFileSync(path.join(PROJECT_ROOT, 'hedera_ci_policy_mesh.html'), 'utf-8').replaceAll(
+      "'${API_ORIGIN}'",
+      "''",
+    );
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(readFileSync(path.join(PROJECT_ROOT, 'hedera_ci_policy_mesh.html')));
+    res.end(html);
     return;
   }
 

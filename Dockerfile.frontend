@@ -1,0 +1,21 @@
+# Frontend container: serves hedera_ci_policy_mesh.html as a static dashboard.
+# Deploy with Coolify pointing at this Dockerfile, mapped to
+# sentry-coding-policy-agent.agentikiq.com. Set the API_ORIGIN environment
+# variable in Coolify to the API container's public URL (defaults below already
+# match the domain given for this deployment).
+
+FROM nginx:alpine
+
+# Recent nginx images already bundle gettext (envsubst) for config templating, but
+# installing explicitly removes any doubt rather than assuming it's present.
+RUN apk add --no-cache gettext
+
+COPY hedera_ci_policy_mesh.html /usr/share/nginx/html/index.html.template
+COPY docker/frontend-entrypoint.sh /docker-entrypoint.d/40-inject-api-origin.sh
+RUN chmod +x /docker-entrypoint.d/40-inject-api-origin.sh
+
+ENV API_ORIGIN=https://sentry-api.agentikiq.com
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \
+  CMD wget -qO- http://localhost/ >/dev/null || exit 1

@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -19,8 +18,8 @@ import type { AgentKey, PolicyConfig, StageContext } from '../server/kit/hooks/t
  * hook code from server/kit/hooks, per IMPLEMENTATION_PLAN.md §10.
  */
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '..');
+// See server/index.ts for why this is cwd-based rather than __dirname-based.
+const PROJECT_ROOT = process.cwd();
 const cfg: PolicyConfig = JSON.parse(readFileSync(path.join(PROJECT_ROOT, 'policy.config.json'), 'utf-8'));
 
 const AGENT_KEYS = Object.keys(cfg.agents) as AgentKey[];

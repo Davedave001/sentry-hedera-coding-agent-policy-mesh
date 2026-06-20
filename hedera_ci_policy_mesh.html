@@ -645,8 +645,23 @@ const NODE_AGENT = ['orch','qa','opt','ctx','sec','dep'];
 let currentApprovalRunId = null;
 let ws = null;
 
+// '${API_ORIGIN}' is replaced at container start (see docker/frontend-entrypoint.sh)
+// when this file is served from a separate frontend container than the API. Left
+// untouched — e.g. when server/index.ts serves this file directly in single-process
+// dev mode — it still starts with '${' and is treated as "same origin".
+const API_ORIGIN = (() => {
+  const raw = '${API_ORIGIN}';
+  return raw.startsWith('${') ? '' : raw.replace(/\/$/, '');
+})();
+
+function apiUrl(path){ return API_ORIGIN ? API_ORIGIN + path : path; }
+function wsEndpoint(){
+  if (API_ORIGIN) return API_ORIGIN.replace(/^http/, 'ws');
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+}
+
 function connectWs(){
-  ws = new WebSocket(`ws://${location.host}`);
+  ws = new WebSocket(wsEndpoint());
   ws.onmessage = (ev) => handleServerEvent(JSON.parse(ev.data));
   ws.onclose = () => setTimeout(connectWs, 1000);
 }
@@ -690,7 +705,7 @@ function handleServerEvent(event){
         <span>Cost</span>      <strong class="v">${fmt(s.costHbar,2)} ℏ ≈ $${fmt(s.costUsd,4)}</strong>
       `;
       showApproval(event.title, event.p, bodyHTML).then(approved => {
-        fetch('/approve', {
+        fetch(apiUrl('/approve'), {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({runId: currentApprovalRunId, approved}),
         });
@@ -718,7 +733,7 @@ async function runPipeline(){
   for(let i=0;i<5;i++)setConn(i,'');
 
   try {
-    const res = await fetch('/run', {
+    const res = await fetch(apiUrl('/run'), {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({prTitle: pr}),
     });

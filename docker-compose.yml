@@ -1,0 +1,26 @@
+# For local verification of both containers together before deploying the same two
+# Dockerfiles as separate Coolify applications. Not required by Coolify itself —
+# Coolify can build directly from Dockerfile.api / Dockerfile.frontend per app.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - '8787:8787'
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FRONTEND_ORIGIN: http://localhost:8080
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - '8080:80'
+    environment:
+      API_ORIGIN: http://localhost:8787
+    depends_on:
+      - api
