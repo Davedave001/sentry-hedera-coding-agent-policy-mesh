@@ -32,7 +32,7 @@ function setCorsHeaders(res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   setCorsHeaders(res);
 
   if (req.method === 'OPTIONS') {
@@ -41,21 +41,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && req.url === '/health') {
+  if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
+    // This API container doesn't serve the dashboard — that's Dockerfile.frontend's
+    // job. A previous version tried to read hedera_ci_policy_mesh.html here for
+    // dev/monolith convenience, but that file isn't copied into this image, so any
+    // request to '/' (a bot, an uptime check, a misconfigured link) threw ENOENT
+    // inside this async handler — Node treats a synchronous throw in an async
+    // listener as an unhandled rejection and kills the whole process, taking down
+    // every in-flight request, not just the offending one. Keep this route to a
+    // plain JSON response with no filesystem access.
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', running }));
-    return;
-  }
-
-  if (req.method === 'GET' && req.url === '/') {
-    // Dev/monolith convenience only — the split-container deployment serves this
-    // file from a separate frontend container (Dockerfile.frontend), not from here.
-    const html = readFileSync(path.join(PROJECT_ROOT, 'hedera_ci_policy_mesh.html'), 'utf-8').replaceAll(
-      "'${API_ORIGIN}'",
-      "''",
-    );
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(html);
     return;
   }
 
@@ -115,6 +111,21 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404);
   res.end();
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((err) => {
+    // Any route handler throwing (sync or async) lands here instead of becoming an
+    // unhandled rejection that kills the whole process — see the comment above for
+    // exactly that failure mode.
+    console.error('Unhandled request error:', err);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'internal server error' }));
+    } else {
+      res.end();
+    }
+  });
 });
 
 const wss = new WebSocketServer({ server });

@@ -141,7 +141,9 @@ the pipeline.
 
 ```
 /server
-  index.ts                  # HTTP + WS server, serves hedera_ci_policy_mesh.html
+  index.ts                  # HTTP + WS API only — /health, /run, /approve, WS push;
+                              # the dashboard HTML is served by a separate frontend
+                              # container (Dockerfile.frontend), not from here
   pipeline.ts                # 6-stage orchestration (mirrors runPipeline() in HTML)
   kit/
     agentKit.ts               # HederaAgentKit instance (testnet), plugin registration
